@@ -1,38 +1,26 @@
 import queue
 import threading
 import time
-from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
-from core.app.entities.app_invoke_entities import InvokeFrom
 from core.workflow.entities.node_entities import NodeRunResult
 from core.workflow.entities.variable_pool import VariablePool
 from core.workflow.entities.workflow_node_execution import WorkflowNodeExecutionStatus
 from core.workflow.graph_engine.entities.event import (
+    GraphEngineEvent,
     GraphRunStartedEvent,
     GraphRunSucceededEvent,
 )
 from core.workflow.graph_engine.entities.graph import Graph
 from core.workflow.graph_engine.entities.graph_runtime_state import GraphRuntimeState
+from core.workflow.graph_engine.queue_based_graph_engine import Task
 from core.workflow.system_variable import SystemVariable
-from models.enums import UserFrom
-from models.workflow import WorkflowType
-
-
-@dataclass
-class Task:
-    """Represents a node execution task in the queue"""
-    node_id: str
-    variable_pool: VariablePool
-    parallel_info: Optional[dict[str, Any]] = None
-    retry_count: int = 0
-    dependencies_met: bool = True
 
 
 class MockTaskQueue:
     """
     Mock implementation of a task queue that tracks all operations
-    for testing purposes.
+    for testing purposes. Implements the TaskQueueProtocol[Task].
     """
     def __init__(self):
         self._queue = queue.Queue()
@@ -42,16 +30,16 @@ class MockTaskQueue:
         self.get_count = 0
         self.task_timestamps = {}  # Track when each task was queued/processed
         
-    def put(self, task: Task, block: bool = True, timeout: Optional[float] = None):
+    def put(self, item: Task, block: bool = True, timeout: Optional[float] = None) -> None:
         """Add a task to the queue and record the operation"""
         self.put_count += 1
         self.put_history.append({
-            'task': task,
+            'task': item,
             'timestamp': time.time(),
             'thread': threading.current_thread().name
         })
-        self.task_timestamps[f"{task.node_id}_queued"] = time.time()
-        self._queue.put(task, block=block, timeout=timeout)
+        self.task_timestamps[f"{item.node_id}_queued"] = time.time()
+        self._queue.put(item, block=block, timeout=timeout)
         
     def get(self, block: bool = True, timeout: Optional[float] = None) -> Task:
         """Get a task from the queue and record the operation"""
@@ -73,17 +61,67 @@ class MockTaskQueue:
         """Get queue size"""
         return self._queue.qsize()
         
-    def task_done(self):
+    def task_done(self) -> None:
         """Mark task as done"""
         self._queue.task_done()
         
-    def join(self):
+    def join(self) -> None:
+        """Wait for all tasks to complete"""
+        self._queue.join()
+
+
+class MockEventQueue:
+    """
+    Mock implementation of an event queue that tracks all operations
+    for testing purposes. Implements the TaskQueueProtocol[GraphEngineEvent].
+    """
+    def __init__(self):
+        self._queue = queue.Queue()
+        self.put_history = []  # Track all put operations
+        self.get_history = []  # Track all get operations
+        self.put_count = 0
+        self.get_count = 0
+        
+    def put(self, item: GraphEngineEvent, block: bool = True, timeout: Optional[float] = None) -> None:
+        """Add an event to the queue and record the operation"""
+        self.put_count += 1
+        self.put_history.append({
+            'event': item,
+            'timestamp': time.time(),
+            'thread': threading.current_thread().name
+        })
+        self._queue.put(item, block=block, timeout=timeout)
+        
+    def get(self, block: bool = True, timeout: Optional[float] = None) -> GraphEngineEvent:
+        """Get an event from the queue and record the operation"""
+        event = self._queue.get(block=block, timeout=timeout)
+        self.get_count += 1
+        self.get_history.append({
+            'event': event,
+            'timestamp': time.time(),
+            'thread': threading.current_thread().name
+        })
+        return event
+        
+    def empty(self) -> bool:
+        """Check if queue is empty"""
+        return self._queue.empty()
+        
+    def qsize(self) -> int:
+        """Get queue size"""
+        return self._queue.qsize()
+        
+    def task_done(self) -> None:
+        """Mark task as done"""
+        self._queue.task_done()
+        
+    def join(self) -> None:
         """Wait for all tasks to complete"""
         self._queue.join()
 
 
 class TestQueueBasedGraphEngine:
-    def test_queue_based_execution_with_dependency_injection(self, flask_app_with_db_ctx):
+    def test_queue_based_execution_with_dependency_injection(self, app):
         """
         Test that verifies the queue-based graph engine with dependency injection.
         
@@ -108,13 +146,16 @@ class TestQueueBasedGraphEngine:
             "nodes": [
                 {
                     "id": "start",
-                    "type": "start",
-                    "data": {"variables": []}
+                    "data": {
+                        "type": "start",
+                        "title": "Start",
+                        "variables": []
+                    }
                 },
                 {
                     "id": "node1",
-                    "type": "code",
                     "data": {
+                        "type": "code",
                         "title": "Node 1",
                         "code": "result = 10",
                         "outputs": {"result": {"type": "number"}}
@@ -122,8 +163,8 @@ class TestQueueBasedGraphEngine:
                 },
                 {
                     "id": "node2",
-                    "type": "code",
                     "data": {
+                        "type": "code",
                         "title": "Node 2",
                         "code": "result = 20",
                         "outputs": {"result": {"type": "number"}}
@@ -131,8 +172,8 @@ class TestQueueBasedGraphEngine:
                 },
                 {
                     "id": "node3",
-                    "type": "code",
                     "data": {
+                        "type": "code",
                         "title": "Node 3",
                         "code": "sum_result = node1_result + node2_result",
                         "variables": [
@@ -144,9 +185,10 @@ class TestQueueBasedGraphEngine:
                 },
                 {
                     "id": "end",
-                    "type": "end",
                     "data": {
-                        "outputs": [{"value": "{{#node3.sum_result#}}", "variable": "output"}]
+                        "type": "end",
+                        "title": "End",
+                        "outputs": [{"value_selector": ["node3", "sum_result"], "variable": "output"}]
                     }
                 }
             ],
@@ -161,24 +203,23 @@ class TestQueueBasedGraphEngine:
         
         # Create custom task queue
         task_queue = MockTaskQueue()
-        event_queue = MockTaskQueue()
+        event_queue = MockEventQueue()
         
         # Create graph and runtime state
-        graph = Graph.create(graph_config)
-        variable_pool = VariablePool(system_variables=SystemVariable())
+        graph = Graph.init(graph_config=graph_config)
+        variable_pool = VariablePool(
+            system_variables=SystemVariable(
+                user_id="test_user", 
+                app_id="test_app", 
+                workflow_id="test_workflow", 
+                files=[]
+            ),
+            user_inputs={"query": "test"}
+        )
         
         runtime_state = GraphRuntimeState(
-            graph=graph,
-            start_at="start",
             variable_pool=variable_pool,
-            invoke_from=InvokeFrom.SERVICE_API,
-            call_depth=0,
-            max_execution_time=600,
-            max_execution_steps=1000,
-            user_id="test_user",
-            workflow_id="test_workflow",
-            workflow_type=WorkflowType.WORKFLOW,
-            user_from=UserFrom.SERVICE_API
+            start_at=time.perf_counter()
         )
         
         # Track which workers processed which nodes
@@ -225,6 +266,8 @@ class TestQueueBasedGraphEngine:
                     status=WorkflowNodeExecutionStatus.SUCCEEDED,
                     outputs={"output": 30}
                 )
+            else:
+                raise ValueError(f"Unexpected node_id in test: {node_id}")
         
         # Act
         from core.workflow.graph_engine.queue_based_graph_engine import QueueBasedGraphEngine
