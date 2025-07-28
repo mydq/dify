@@ -11,6 +11,7 @@ import threading
 import time
 from collections import defaultdict
 from collections.abc import Callable, Generator
+from types import GeneratorType
 from typing import Any, Optional
 
 from core.app.entities.app_invoke_entities import InvokeFrom
@@ -25,7 +26,7 @@ from core.workflow.graph_engine.entities.graph import Graph
 from core.workflow.graph_engine.entities.graph_init_params import GraphInitParams
 from core.workflow.graph_engine.entities.graph_runtime_state import GraphRuntimeState
 from core.workflow.nodes import NodeType
-from core.workflow.nodes.event import NodeEvent, RunCompletedEvent
+from core.workflow.nodes.event import RunCompletedEvent
 from core.workflow.nodes.node_mapping import NODE_TYPE_CLASSES_MAPPING
 from models.enums import UserFrom
 from models.workflow import WorkflowType
@@ -51,7 +52,7 @@ class QueueBasedGraphEngine:
         worker_count: int = 2,
         task_queue: Optional[TaskQueueProtocol[Task]] = None,
         event_queue: Optional[TaskQueueProtocol[GraphEngineEvent]] = None,
-        node_executor: Optional[Callable[[Task], Generator[NodeEvent, None, None]]] = None,
+        node_executor: Optional[Callable[[Task], Generator[GraphEngineEvent, None, None]]] = None,
     ):
         self.graph = graph
         self.runtime_state = runtime_state
@@ -69,7 +70,7 @@ class QueueBasedGraphEngine:
         self.node_executor = node_executor if node_executor is not None else self._default_node_executor
 
         # Track dependencies
-        self.in_degree = defaultdict(int)
+        self.in_degree: dict[str, int] = defaultdict(int)
 
         # Shared state for workers (using dicts for mutable reference sharing)
         self.pending_tasks_counter = {"count": 0}
@@ -77,14 +78,17 @@ class QueueBasedGraphEngine:
         self.lock = threading.Lock()
 
         # Track completed nodes for dependency resolution
-        self.completed_nodes = set()
+        self.completed_nodes: set[str] = set()
 
         # Workers
-        self.workers = []
+        self.workers: list[GraphEngineWorker] = []
         self.stop_workers = threading.Event()
 
         # Track node outputs
-        self.node_outputs = {}
+        self.node_outputs: dict[str, dict[str, Any]] = {}
+
+        # Track running nodes to match completion events
+        self.running_nodes: dict[str, bool] = {}
 
     @property
     def pending_tasks(self) -> int:
@@ -133,6 +137,10 @@ class QueueBasedGraphEngine:
                     event = self.event_queue.get(timeout=0.1)
                     yield event
 
+                    # Handle successor queuing when we receive RunCompletedEvent
+                    if isinstance(event, RunCompletedEvent):
+                        self._handle_node_completion(event)
+
                 except queue.Empty:
                     # Check if we're done
                     with self.lock:
@@ -168,7 +176,13 @@ class QueueBasedGraphEngine:
     def _enqueue_task(self, node_id: str) -> None:
         """Add a task to the queue"""
         with self.lock:
+            # Don't queue a node that's already running or completed
+            if node_id in self.running_nodes or node_id in self.completed_nodes:
+                return
+
             self.pending_tasks_counter["count"] += 1
+            # Track that this node is now running
+            self.running_nodes[node_id] = True
 
         task = Task(node_id=node_id, variable_pool=self.runtime_state.variable_pool.model_copy())
         self.task_queue.put(task)
@@ -187,36 +201,11 @@ class QueueBasedGraphEngine:
                 completed_nodes=self.completed_nodes,
                 node_outputs=self.node_outputs,
                 execution_steps_counter=self.execution_steps_counter,
-                successor_callback=self._queue_successors,
             )
             worker.start()
             self.workers.append(worker)
 
-    def _queue_successors(self, node_id: str) -> None:
-        """Queue successor nodes whose dependencies are satisfied"""
-        # Get outgoing edges from this node
-        outgoing_edges = self.graph.edge_mapping.get(node_id, [])
-
-        for edge in outgoing_edges:
-            target_id = edge.target_node_id
-
-            # Check if all dependencies are met for the target node
-            dependencies_met = True
-
-            # Check all incoming edges to the target node
-            for source_id, edges_list in self.graph.edge_mapping.items():
-                for check_edge in edges_list:
-                    if check_edge.target_node_id == target_id:
-                        if source_id not in self.completed_nodes:
-                            dependencies_met = False
-                            break
-                if not dependencies_met:
-                    break
-
-            if dependencies_met:
-                self._enqueue_task(target_id)
-
-    def _default_node_executor(self, task: Task) -> NodeRunResult:
+    def _default_node_executor(self, task: Task) -> Generator[GraphEngineEvent, None, None]:
         """Default node executor implementation that runs real nodes"""
         node_id = task.node_id
         node_config = self.graph.node_id_config_mapping.get(node_id)
@@ -261,15 +250,18 @@ class QueueBasedGraphEngine:
         result = node.run()
 
         # Handle both NodeRunResult and Generator cases
-        if hasattr(result, "__next__"):  # It's a generator returning NodeEvents
-            # Return the generator as-is - the worker will handle events
-            return result
-        else:
-            # It's a NodeRunResult - convert to RunCompletedEvent (which is a NodeEvent)
-            def result_to_event_generator():
+        if isinstance(result, GeneratorType):  # It's a generator returning GraphEngineEvents
+            # Cast the generator to the expected type since node events inherit from GraphEngineEvent
+            event_gen: Generator[GraphEngineEvent, None, None] = result
+            return event_gen
+        elif isinstance(result, NodeRunResult):
+            # It's a NodeRunResult - convert to RunCompletedEvent (which is a GraphEngineEvent)
+            def result_to_event_generator() -> Generator[GraphEngineEvent, None, None]:
                 yield RunCompletedEvent(run_result=result)
 
             return result_to_event_generator()
+        else:
+            raise ValueError(f"Unexpected result type from node.run(): {type(result)}")
 
     def _get_graph_outputs(self) -> dict[str, Any]:
         """Get outputs from the graph (from end nodes)"""
@@ -282,3 +274,66 @@ class QueueBasedGraphEngine:
                     outputs.update(self.node_outputs[node_id])
 
         return outputs
+
+    def _handle_node_completion(self, event: RunCompletedEvent) -> None:
+        """Handle node completion and queue successors with conditional logic"""
+        node_run_result = event.run_result
+
+        # Find the node that just completed by checking which running node has the matching result
+        completed_node_id = None
+        with self.lock:
+            # Find nodes that are in running_nodes and also in completed_nodes (just completed)
+            for node_id in list(self.running_nodes.keys()):
+                if node_id in self.completed_nodes:
+                    # This node just completed, remove it from running_nodes to avoid double processing
+                    completed_node_id = node_id
+                    del self.running_nodes[node_id]
+                    break
+
+        if not completed_node_id:
+            return
+
+        # Queue successors with conditional logic
+        self._queue_successors_with_conditions(completed_node_id, node_run_result)
+
+    def _queue_successors_with_conditions(self, node_id: str, node_run_result: NodeRunResult) -> None:
+        """Queue successor nodes with proper conditional branching logic"""
+        # Get outgoing edges from this node
+        outgoing_edges = self.graph.edge_mapping.get(node_id, [])
+
+        for edge in outgoing_edges:
+            # Check if this edge should be followed based on run conditions
+            should_follow_edge = self._should_follow_edge(edge, node_run_result)
+
+            if should_follow_edge:
+                target_id = edge.target_node_id
+
+                # Check if all dependencies are met for the target node
+                dependencies_met = self._check_dependencies_met(target_id)
+
+                if dependencies_met:
+                    self._enqueue_task(target_id)
+
+    def _should_follow_edge(self, edge, node_run_result: NodeRunResult) -> bool:
+        """Check if an edge should be followed based on conditional logic"""
+        # If edge has no run condition, always follow it
+        if not edge.run_condition:
+            return True
+
+        # Handle branch identification conditions
+        if edge.run_condition and hasattr(edge.run_condition, "type") and edge.run_condition.type == "branch_identify":
+            # Match the edge's branch_identify with the node's edge_source_handle
+            return bool(node_run_result.edge_source_handle == edge.run_condition.branch_identify)
+
+        # Default: follow the edge
+        return True
+
+    def _check_dependencies_met(self, target_id: str) -> bool:
+        """Check if all dependencies are met for the target node"""
+        # Check all incoming edges to the target node
+        for source_id, edges_list in self.graph.edge_mapping.items():
+            for check_edge in edges_list:
+                if check_edge.target_node_id == target_id:
+                    if source_id not in self.completed_nodes:
+                        return False
+        return True

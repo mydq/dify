@@ -11,7 +11,7 @@ from collections.abc import Callable, Generator
 from typing import Optional
 
 from core.workflow.graph_engine.entities.event import GraphEngineEvent
-from core.workflow.nodes.event import NodeEvent, RunCompletedEvent
+from core.workflow.nodes.event import RunCompletedEvent
 
 from .entities import Task, TaskQueueProtocol
 
@@ -28,14 +28,13 @@ class GraphEngineWorker:
         worker_id: int,
         task_queue: TaskQueueProtocol[Task],
         event_queue: TaskQueueProtocol[GraphEngineEvent],
-        node_executor: Callable[[Task], Generator[NodeEvent, None, None]],
+        node_executor: Callable[[Task], Generator[GraphEngineEvent, None, None]],
         stop_event: threading.Event,
         lock: threading.Lock,
         pending_tasks_counter: dict[str, int],
         completed_nodes: set[str],
         node_outputs: dict[str, dict],
         execution_steps_counter: dict[str, int],
-        successor_callback: Callable[[str], None],
     ):
         self.worker_id = worker_id
         self.task_queue = task_queue
@@ -47,7 +46,6 @@ class GraphEngineWorker:
         self.completed_nodes = completed_nodes
         self.node_outputs = node_outputs
         self.execution_steps_counter = execution_steps_counter
-        self.successor_callback = successor_callback
 
         self.thread: Optional[threading.Thread] = None
 
@@ -87,7 +85,7 @@ class GraphEngineWorker:
         with self.lock:
             self.execution_steps_counter["count"] += 1
 
-        # Execute node - this returns a generator of NodeEvents
+        # Execute node - this returns a generator of GraphEngineEvents
         event_generator = self.node_executor(task)
 
         # Process all events from the node
@@ -113,5 +111,4 @@ class GraphEngineWorker:
         with self.lock:
             self.completed_nodes.add(node_id)
 
-        # Queue successor nodes
-        self.successor_callback(node_id)
+        # Successor nodes are now queued by the main engine when it receives RunCompletedEvent
