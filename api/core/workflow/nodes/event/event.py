@@ -1,28 +1,30 @@
 from collections.abc import Sequence
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from core.model_runtime.entities.llm_entities import LLMUsage
 from core.rag.entities.citation_metadata import RetrievalSourceMetadata
 from core.workflow.entities.node_entities import NodeRunResult
 
+from .types import NodeEvent
 
-class RunCompletedEvent(BaseModel):
+
+class RunCompletedEvent(NodeEvent):
     run_result: NodeRunResult = Field(..., description="run result")
 
 
-class RunStreamChunkEvent(BaseModel):
+class RunStreamChunkEvent(NodeEvent):
     chunk_content: str = Field(..., description="chunk content")
     from_variable_selector: list[str] = Field(..., description="from variable selector")
 
 
-class RunRetrieverResourceEvent(BaseModel):
+class RunRetrieverResourceEvent(NodeEvent):
     retriever_resources: Sequence[RetrievalSourceMetadata] = Field(..., description="retriever resources")
     context: str = Field(..., description="context")
 
 
-class ModelInvokeCompletedEvent(BaseModel):
+class ModelInvokeCompletedEvent(NodeEvent):
     """
     Model invoke completed
     """
@@ -32,7 +34,7 @@ class ModelInvokeCompletedEvent(BaseModel):
     finish_reason: str | None = None
 
 
-class RunRetryEvent(BaseModel):
+class RunRetryEvent(NodeEvent):
     """Node Run Retry event"""
 
     error: str = Field(..., description="error")

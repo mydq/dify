@@ -1,3 +1,9 @@
-from .event import ModelInvokeCompletedEvent, RunCompletedEvent, RunRetrieverResourceEvent, RunStreamChunkEvent
+from abc import ABC
 
-NodeEvent = RunCompletedEvent | RunStreamChunkEvent | RunRetrieverResourceEvent | ModelInvokeCompletedEvent
+from pydantic import BaseModel
+
+
+class NodeEvent(BaseModel, ABC):
+    """Base class for all node events"""
+
+    pass
