@@ -7,11 +7,11 @@ This module contains the worker logic that processes tasks from the queue.
 import logging
 import queue
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from typing import Optional
 
-from core.workflow.entities.node_entities import NodeRunResult
 from core.workflow.graph_engine.entities.event import GraphEngineEvent
+from core.workflow.nodes.event import NodeEvent, RunCompletedEvent
 
 from .entities import Task, TaskQueueProtocol
 
@@ -22,13 +22,13 @@ class GraphEngineWorker:
     """
     Worker that processes tasks from the task queue.
     """
-    
+
     def __init__(
         self,
         worker_id: int,
         task_queue: TaskQueueProtocol[Task],
         event_queue: TaskQueueProtocol[GraphEngineEvent],
-        node_executor: Callable[[Task], NodeRunResult],
+        node_executor: Callable[[Task], Generator[NodeEvent, None, None]],
         stop_event: threading.Event,
         lock: threading.Lock,
         pending_tasks_counter: dict[str, int],
@@ -48,23 +48,19 @@ class GraphEngineWorker:
         self.node_outputs = node_outputs
         self.execution_steps_counter = execution_steps_counter
         self.successor_callback = successor_callback
-        
+
         self.thread: Optional[threading.Thread] = None
-        
+
     def start(self) -> None:
         """Start the worker thread"""
-        self.thread = threading.Thread(
-            target=self._worker_loop,
-            name=f"QueueWorker-{self.worker_id}",
-            daemon=True
-        )
+        self.thread = threading.Thread(target=self._worker_loop, name=f"QueueWorker-{self.worker_id}", daemon=True)
         self.thread.start()
-        
+
     def join(self, timeout: Optional[float] = None) -> None:
         """Wait for the worker thread to finish"""
         if self.thread:
             self.thread.join(timeout)
-            
+
     def _worker_loop(self) -> None:
         """Worker thread main loop"""
         while not self.stop_event.is_set():
@@ -72,7 +68,7 @@ class GraphEngineWorker:
                 task = self.task_queue.get(timeout=0.1)
             except queue.Empty:
                 continue
-                
+
             try:
                 self._process_task(task)
             except Exception as e:
@@ -82,29 +78,40 @@ class GraphEngineWorker:
                 self.task_queue.task_done()
                 with self.lock:
                     self.pending_tasks_counter["count"] -= 1
-                    
+
     def _process_task(self, task: Task) -> None:
         """Process a single task"""
         node_id = task.node_id
-        
+
         # Increment execution steps
         with self.lock:
             self.execution_steps_counter["count"] += 1
-        
-        # Execute node
-        result = self.node_executor(task)
-        
-        # Store outputs
-        if result.outputs:
+
+        # Execute node - this returns a generator of NodeEvents
+        event_generator = self.node_executor(task)
+
+        # Process all events from the node
+        final_result = None
+        for event in event_generator:
+            # Forward the event to the event queue for consumers
+            self.event_queue.put(event)
+
+            # Check if this is a RunCompletedEvent which contains the final result
+            if isinstance(event, RunCompletedEvent):
+                final_result = event.run_result
+                break
+
+        # Store outputs from the final result
+        if final_result and final_result.outputs:
             with self.lock:
-                self.node_outputs[node_id] = dict(result.outputs)
+                self.node_outputs[node_id] = dict(final_result.outputs)
                 # Update variable pool with node outputs
-                for key, value in result.outputs.items():
+                for key, value in final_result.outputs.items():
                     task.variable_pool.add((node_id, key), value)
-        
+
         # Mark node as completed
         with self.lock:
             self.completed_nodes.add(node_id)
-        
+
         # Queue successor nodes
         self.successor_callback(node_id)
