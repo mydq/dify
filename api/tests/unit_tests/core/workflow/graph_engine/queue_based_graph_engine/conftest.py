@@ -3,11 +3,8 @@ import threading
 import time
 from typing import Optional
 
-from core.workflow.entities.node_entities import NodeRunResult
-from core.workflow.entities.workflow_node_execution import WorkflowNodeExecutionStatus
 from core.workflow.graph_engine.entities.event import GraphEngineEvent
 from core.workflow.graph_engine.queue_based_graph_engine.entities import Task
-from core.workflow.nodes.event import RunCompletedEvent
 
 
 class MockTaskQueue:
@@ -97,50 +94,3 @@ class MockEventQueue:
     def join(self) -> None:
         """Wait for all tasks to complete"""
         self._queue.join()
-
-
-def create_mock_node_executor():
-    """Create a mock node executor for testing"""
-    worker_assignments = {}
-
-    def mock_node_executor(task: Task):
-        """Mock node execution that simulates work and tracks worker assignment"""
-        node_id = task.node_id
-        worker_name = threading.current_thread().name
-
-        if worker_name not in worker_assignments:
-            worker_assignments[worker_name] = []
-        worker_assignments[worker_name].append(node_id)
-
-        # Simulate some work
-        time.sleep(0.01)
-
-        if node_id == "start":
-            result = NodeRunResult(status=WorkflowNodeExecutionStatus.SUCCEEDED, edge_source_handle="source")
-        elif node_id == "node1":
-            result = NodeRunResult(
-                status=WorkflowNodeExecutionStatus.SUCCEEDED, outputs={"result": 10}, edge_source_handle="source"
-            )
-        elif node_id == "node2":
-            result = NodeRunResult(
-                status=WorkflowNodeExecutionStatus.SUCCEEDED, outputs={"result": 20}, edge_source_handle="source"
-            )
-        elif node_id == "node3":
-            result = NodeRunResult(
-                status=WorkflowNodeExecutionStatus.SUCCEEDED,
-                outputs={"sum_result": 30},
-                edge_source_handle="source",
-            )
-        elif node_id == "end":
-            result = NodeRunResult(status=WorkflowNodeExecutionStatus.SUCCEEDED, outputs={"output": 30})
-        else:
-            raise ValueError(f"Unexpected node_id in test: {node_id}")
-
-        # Convert NodeRunResult to generator of RunCompletedEvent
-        def result_generator():
-            yield RunCompletedEvent(run_result=result)
-
-        return result_generator()
-
-    # Return both the executor and worker assignments tracker
-    return mock_node_executor, worker_assignments
