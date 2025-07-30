@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pytz
 from flask import request
 from flask_login import current_user
@@ -327,6 +329,8 @@ class EducationVerifyApi(Resource):
 class EducationApi(Resource):
     status_fields = {
         "result": fields.Boolean,
+        "expireAt": TimestampField,
+        "allow_refresh": fields.Boolean,
     }
 
     @setup_required
@@ -354,7 +358,11 @@ class EducationApi(Resource):
     def get(self):
         account = current_user
 
-        return BillingService.EducationIdentity.is_active(account.id)
+        res = BillingService.EducationIdentity.status(account.id)
+        # convert expireAt to UTC timestamp from isoformat
+        if res and "expireAt" in res:
+            res["expireAt"] = datetime.fromisoformat(res["expireAt"]).astimezone(pytz.utc)
+        return res
 
 
 class EducationAutoCompleteApi(Resource):
@@ -539,4 +547,5 @@ api.add_resource(ChangeEmailCheckApi, "/account/change-email/validity")
 api.add_resource(ChangeEmailResetApi, "/account/change-email/reset")
 api.add_resource(CheckEmailUnique, "/account/change-email/check-email-unique")
 # api.add_resource(AccountEmailApi, '/account/email')
+# api.add_resource(AccountEmailVerifyApi, '/account/email-verify')
 # api.add_resource(AccountEmailVerifyApi, '/account/email-verify')
