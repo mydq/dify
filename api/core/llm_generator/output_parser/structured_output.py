@@ -321,7 +321,7 @@ def _prepare_schema_for_model(provider: str, model_schema: AIModelEntity, schema
     processed_schema = dict(deepcopy(schema))
 
     # Convert boolean types to string types (common requirement)
-    convert_boolean_to_string(processed_schema)
+    # convert_boolean_to_string(processed_schema)
 
     # Apply model-specific transformations
     if SpecialModelType.GEMINI in model_schema.model:
