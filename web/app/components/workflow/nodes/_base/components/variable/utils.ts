@@ -56,9 +56,10 @@ export const hasValidChildren = (children: any): boolean => {
   )
 }
 
-const inputVarTypeToVarType = (type: InputVarType): VarType => {
+export const inputVarTypeToVarType = (type: InputVarType): VarType => {
   return ({
     [InputVarType.number]: VarType.number,
+    [InputVarType.checkbox]: VarType.boolean,
     [InputVarType.singleFile]: VarType.file,
     [InputVarType.multiFiles]: VarType.arrayFile,
   } as any)[type] || VarType.string
@@ -741,6 +742,8 @@ const getLoopItemType = ({
       return VarType.number
     case VarType.arrayObject:
       return VarType.object
+    case VarType.arrayBoolean:
+      return VarType.boolean
     case VarType.array:
       return VarType.any
     case VarType.arrayFile:
