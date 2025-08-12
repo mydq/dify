@@ -8,7 +8,7 @@ from core.entities.model_entities import (
     ModelWithProviderEntity,
     ProviderModelWithStatusEntity,
 )
-from core.entities.provider_entities import ProviderQuotaType, QuotaConfiguration
+from core.entities.provider_entities import ProviderCredentialConfiguration, ProviderQuotaType, QuotaConfiguration
 from core.model_runtime.entities.common_entities import I18nObject
 from core.model_runtime.entities.model_entities import ModelType
 from core.model_runtime.entities.provider_entities import (
@@ -36,6 +36,9 @@ class CustomConfigurationResponse(BaseModel):
     """
 
     status: CustomConfigurationStatus
+    current_credential_id: Optional[str] = None
+    current_credential_name: Optional[str] = None
+    available_credentials: Optional[list[ProviderCredentialConfiguration]] = None
 
 
 class SystemConfigurationResponse(BaseModel):

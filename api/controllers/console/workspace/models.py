@@ -228,10 +228,17 @@ class ModelProviderModelCredentialApi(Resource):
             tenant_id=tenant_id, provider=provider, model=args["model"], model_type=args["model_type"]
         )
 
-        return {
-            "credentials": credentials,
-            "load_balancing": {"enabled": is_load_balancing_enabled, "configs": load_balancing_configs},
-        }
+        available_credentials = model_provider_service.provider_manager.get_provider_available_credentials(
+            tenant_id=tenant_id, provider_name=provider
+        )
+
+        return jsonable_encoder(
+            {
+                "credentials": credentials,
+                "load_balancing": {"enabled": is_load_balancing_enabled, "configs": load_balancing_configs},
+                "available_credentials": available_credentials,
+            }
+        )
 
 
 class ModelProviderModelEnableApi(Resource):

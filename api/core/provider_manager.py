@@ -16,6 +16,7 @@ from core.entities.provider_entities import (
     CustomProviderConfiguration,
     ModelLoadBalancingConfiguration,
     ModelSettings,
+    ProviderCredentialConfiguration,
     ProviderQuotaType,
     QuotaConfiguration,
     QuotaUnit,
@@ -39,6 +40,7 @@ from extensions.ext_redis import redis_client
 from models.provider import (
     LoadBalancingModelConfig,
     Provider,
+    ProviderCredential,
     ProviderModel,
     ProviderModelSetting,
     ProviderType,
@@ -488,6 +490,28 @@ class ProviderManager:
         return provider_name_to_provider_load_balancing_model_configs_dict
 
     @staticmethod
+    def get_provider_available_credentials(tenant_id: str, provider_name: str) -> list[ProviderCredentialConfiguration]:
+        """
+        Get provider all credentials.
+
+        :param tenant_id: workspace id
+        :return: dict mapping provider_name to list of credentials
+        """
+        with Session(db.engine, expire_on_commit=False) as session:
+            stmt = (
+                select(ProviderCredential)
+                .where(ProviderCredential.tenant_id == tenant_id, ProviderCredential.provider_name == provider_name)
+                .order_by(ProviderCredential.created_at.desc())
+            )
+
+            available_credentials = session.scalars(stmt).all()
+
+        return [
+            ProviderCredentialConfiguration(credential_id=credential.id, credential_name=credential.credential_name)
+            for credential in available_credentials
+        ]
+
+    @staticmethod
     def _init_trial_provider_records(
         tenant_id: str, provider_name_to_provider_records_dict: dict[str, list[Provider]]
     ) -> dict[str, list[Provider]]:
@@ -638,7 +662,12 @@ class ProviderManager:
             else:
                 provider_credentials = cached_provider_credentials
 
-            custom_provider_configuration = CustomProviderConfiguration(credentials=provider_credentials)
+            custom_provider_configuration = CustomProviderConfiguration(
+                credentials=provider_credentials,
+                current_credential_name=provider_record.credential_name,
+                current_credential_id=provider_record.credential_id,
+                available_credentials=self.get_provider_available_credentials(tenant_id, provider_record.provider_name),
+            )
 
         # Get provider model credential secret variables
         model_credential_secret_variables = self._extract_secret_variables(
