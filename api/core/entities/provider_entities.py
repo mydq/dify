@@ -69,6 +69,15 @@ class QuotaConfiguration(BaseModel):
     restrict_models: list[RestrictModel] = []
 
 
+class ProviderCredentialConfiguration(BaseModel):
+    """
+    Model class for provider credential configuration.
+    """
+
+    credential_id: str
+    credential_name: str
+
+
 class SystemConfiguration(BaseModel):
     """
     Model class for provider system configuration.
@@ -86,6 +95,9 @@ class CustomProviderConfiguration(BaseModel):
     """
 
     credentials: dict
+    current_credential_id: Optional[str] = None
+    current_credential_name: Optional[str] = None
+    available_credentials: list[ProviderCredentialConfiguration] = []
 
 
 class CustomModelConfiguration(BaseModel):
