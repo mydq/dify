@@ -1,7 +1,7 @@
 """Add provider multi credential support
 
 Revision ID: e8446f481c1e
-Revises: 532b3f888abf
+Revises: 8bcc02c9bd07
 Create Date: 2025-08-09 15:53:54.341341
 
 """
@@ -13,7 +13,7 @@ import uuid
 
 # revision identifiers, used by Alembic.
 revision = 'e8446f481c1e'
-down_revision = '532b3f888abf'
+down_revision = '8bcc02c9bd07'
 branch_labels = None
 depends_on = None
 
