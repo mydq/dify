@@ -16,7 +16,6 @@ import type { ConversationVariable } from '@/app/components/workflow/types'
 import { CodeLanguage } from '@/app/components/workflow/nodes/code/types'
 import { ChatVarType } from '@/app/components/workflow/panel/chat-variable-panel/type'
 import cn from '@/utils/classnames'
-import { checkKeys, replaceSpaceWithUnderscreInVarNameInput } from '@/utils/var'
 import BoolValue from './bool-value'
 import ArrayBoolList from './array-bool-list'
 import {
@@ -26,6 +25,7 @@ import {
   arrayStringPlaceholder,
   objectPlaceholder,
 } from '@/app/components/workflow/panel/chat-variable-panel/utils'
+import { checkKeys, replaceSpaceWithUnderscoreInVarNameInput } from '@/utils/var'
 
 export type ModalPropsType = {
   chatVar?: ConversationVariable
@@ -134,7 +134,7 @@ const ChatVariableModal = ({
   }
 
   const handleVarNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    replaceSpaceWithUnderscreInVarNameInput(e.target)
+    replaceSpaceWithUnderscoreInVarNameInput(e.target)
     if (!!e.target.value && !checkVariableName(e.target.value))
       return
     setName(e.target.value || '')
@@ -235,10 +235,12 @@ const ChatVariableModal = ({
       return
     if (!chatVar && varList.some(chatVar => chatVar.name === name))
       return notify({ type: 'error', message: 'name is existed' })
-    // if (type !== ChatVarType.Object && !value)
-    //   return notify({ type: 'error', message: 'value can not be empty' })
+
     if (type === ChatVarType.Object && objectValue.some(item => !item.key && !!item.value))
       return notify({ type: 'error', message: 'object key can not be empty' })
+
+    if (description.length > 256)
+      return notify({ type: 'error', message: 'description can not be longer than 256 characters' })
 
     onSave({
       id: chatVar ? chatVar.id : uuid4(),

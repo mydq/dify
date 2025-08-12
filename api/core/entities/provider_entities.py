@@ -188,7 +188,7 @@ class ProviderConfig(BasicProviderConfig):
 
     scope: AppSelectorScope | ModelSelectorScope | ToolSelectorScope | None = None
     required: bool = False
-    default: Optional[Union[int, str]] = None
+    default: Optional[Union[int, str, float, bool]] = None
     options: Optional[list[Option]] = None
     label: Optional[I18nObject] = None
     help: Optional[I18nObject] = None

@@ -10,7 +10,7 @@ import { ToastContext } from '@/app/components/base/toast'
 import { useStore } from '@/app/components/workflow/store'
 import type { EnvironmentVariable } from '@/app/components/workflow/types'
 import cn from '@/utils/classnames'
-import { checkKeys, replaceSpaceWithUnderscreInVarNameInput } from '@/utils/var'
+import { checkKeys, replaceSpaceWithUnderscoreInVarNameInput } from '@/utils/var'
 
 export type ModalPropsType = {
   env?: EnvironmentVariable
@@ -44,7 +44,7 @@ const VariableModal = ({
   }
 
   const handleVarNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    replaceSpaceWithUnderscreInVarNameInput(e.target)
+    replaceSpaceWithUnderscoreInVarNameInput(e.target)
     if (!!e.target.value && !checkVariableName(e.target.value))
       return
     setName(e.target.value || '')
@@ -62,6 +62,8 @@ const VariableModal = ({
     // Original check for create new variable
     if (!env && envList.some(e => e.name === name))
       return notify({ type: 'error', message: 'name is existed' })
+    if (description.length > 256)
+      return notify({ type: 'error', message: 'description can not be longer than 256 characters' })
 
     onSave({
       id: env ? env.id : uuid4(),

@@ -204,7 +204,7 @@ class SegmentType(StrEnum):
 
 
 _ARRAY_ELEMENT_TYPES_MAPPING: Mapping[SegmentType, SegmentType] = {
-    # ARRAY_ANY does not have correpond element type.
+    # ARRAY_ANY does not have corresponding element type.
     SegmentType.ARRAY_STRING: SegmentType.STRING,
     SegmentType.ARRAY_NUMBER: SegmentType.NUMBER,
     SegmentType.ARRAY_OBJECT: SegmentType.OBJECT,
