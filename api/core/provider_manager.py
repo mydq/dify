@@ -631,8 +631,8 @@ class ProviderManager:
                 try:
                     # fix origin data
                     if custom_provider_record.encrypted_config is None:
-                        raise ValueError("No credentials found")
-                    if not custom_provider_record.encrypted_config.startswith("{"):
+                        provider_credentials = {}
+                    elif not custom_provider_record.encrypted_config.startswith("{"):
                         provider_credentials = {"openai_api_key": custom_provider_record.encrypted_config}
                     else:
                         provider_credentials = json.loads(custom_provider_record.encrypted_config)
