@@ -613,9 +613,6 @@ class ProviderManager:
             if provider_record.provider_type == ProviderType.SYSTEM.value:
                 continue
 
-            if not provider_record.encrypted_config:
-                continue
-
             custom_provider_record = provider_record
 
         # Get custom provider credentials
