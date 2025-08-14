@@ -7,13 +7,17 @@ to the event_queue for the dispatcher to process.
 
 import queue
 import threading
+from contextvars import Context
 from datetime import datetime
 from uuid import uuid4
+
+from flask import Flask
 
 from core.workflow.enums import NodeType
 from core.workflow.graph import Graph
 from core.workflow.graph_events import GraphNodeEventBase, NodeRunFailedEvent
 from core.workflow.nodes.base.node import Node
+from libs.flask_utils import preserve_flask_contexts
 
 
 class Worker(threading.Thread):
@@ -30,6 +34,8 @@ class Worker(threading.Thread):
         ready_queue: queue.Queue[str],
         event_queue: queue.Queue[GraphNodeEventBase],
         graph: Graph,
+        app: Flask,
+        context: Context,
         worker_id: int = 0,
     ) -> None:
         """
@@ -47,6 +53,8 @@ class Worker(threading.Thread):
         self.graph = graph
         self.worker_id = worker_id
         self._stop_event = threading.Event()
+        self.app = app
+        self.context = context
 
     def stop(self) -> None:
         """Signal the worker to stop processing."""
@@ -59,32 +67,33 @@ class Worker(threading.Thread):
         Continuously pulls node IDs from ready_queue, executes them,
         and pushes events to event_queue until stopped.
         """
-        while not self._stop_event.is_set():
-            # Try to get a node ID from the ready queue (with timeout)
-            try:
-                node_id = self.ready_queue.get(timeout=0.1)
-            except queue.Empty:
-                continue
-
-            node = self.graph.nodes[node_id]
-            try:
-                self._execute_node(node)
-                self.ready_queue.task_done()
-            except Exception as e:
-                # Handle unexpected errors
+        with preserve_flask_contexts(self.app, self.context):
+            while not self._stop_event.is_set():
+                # Try to get a node ID from the ready queue (with timeout)
                 try:
-                    error_event = NodeRunFailedEvent(
-                        id=str(uuid4()),
-                        node_id="unknown",
-                        node_type=NodeType.CODE,
-                        in_iteration_id=None,
-                        error=str(e),
-                        start_at=datetime.now(),
-                    )
-                    self.event_queue.put(error_event)
-                except Exception:
-                    # If we can't even create an error event, just continue
-                    pass
+                    node_id = self.ready_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+
+                node = self.graph.nodes[node_id]
+                try:
+                    self._execute_node(node)
+                    self.ready_queue.task_done()
+                except Exception as e:
+                    # Handle unexpected errors
+                    try:
+                        error_event = NodeRunFailedEvent(
+                            id=str(uuid4()),
+                            node_id="unknown",
+                            node_type=NodeType.CODE,
+                            in_iteration_id=None,
+                            error=str(e),
+                            start_at=datetime.now(),
+                        )
+                        self.event_queue.put(error_event)
+                    except Exception:
+                        # If we can't even create an error event, just continue
+                        pass
 
     def _execute_node(self, node: Node) -> None:
         """

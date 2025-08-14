@@ -5,12 +5,15 @@ This engine replaces the thread pool architecture with a queue-based dispatcher 
 for improved control and coordination of workflow execution.
 """
 
+import contextvars
 import logging
 import queue
 import threading
 import time
 from collections.abc import Callable, Generator, Mapping, Sequence
 from typing import Any, Optional, TypedDict, cast
+
+from flask import current_app
 
 from core.app.entities.app_invoke_entities import InvokeFrom
 from core.workflow.entities import GraphRuntimeState
@@ -140,6 +143,8 @@ class GraphEngine:
                 event_queue=self.event_queue,
                 graph=self.graph,
                 worker_id=i,
+                app=current_app._get_current_object(),  # type: ignore
+                context=contextvars.copy_context(),
             )
             self.workers.append(worker)
 
