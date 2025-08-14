@@ -62,7 +62,6 @@ class Provider(Base):
     provider_type: Mapped[str] = mapped_column(
         String(40), nullable=False, server_default=text("'custom'::character varying")
     )
-    encrypted_config: Mapped[Optional[str]] = mapped_column(sa.Text, nullable=True)
     is_valid: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, server_default=text("false"))
     last_used: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     credential_id: Mapped[Optional[str]] = mapped_column(StringUUID, nullable=True)
