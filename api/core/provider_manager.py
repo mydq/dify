@@ -663,7 +663,9 @@ class ProviderManager:
                 credentials=provider_credentials,
                 current_credential_name=provider_record.credential_name,
                 current_credential_id=provider_record.credential_id,
-                available_credentials=self.get_provider_available_credentials(tenant_id, provider_record.provider_name),
+                available_credentials=self.get_provider_available_credentials(
+                    tenant_id, custom_provider_record.provider_name
+                ),
             )
 
         # Get provider model credential secret variables
